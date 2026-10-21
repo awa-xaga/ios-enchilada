@@ -18,11 +18,19 @@ MEM_SIZE = 0x4d000000
 # and the kernel hangs right after "kdp_core zlib memory" — reproduced on QEMU
 # and independently on ios-fajita.
 PANIC_LOG_SIZE = 0x100000
-# --highmem (phone only): the whole upper DDR bank. The live FDT memory node is
-# <0x80000000 2G>, <0x1_00000000 0xfcc00000>; every fixed reserved-memory
-# carve-out is in the low bank and the dynamic pools are limited below 4G.
-HIGH_PHYS_BASE = 0x100000000
-HIGH_MEM_SIZE = 0xfcc00000
+# --highmem (phone only): the whole upper DDR bank. sweet's live FDT memory
+# node is <0x80000000 2G>, <0x1_00000000 0xfcc00000>; every fixed
+# reserved-memory carve-out is in the low bank and the dynamic pools are
+# limited below 4G. enchilada's second range was measured on the phone:
+# MEMBASE 0x180000000 size 0xfcba0000 (see NOTES.md).
+BOARDS = {
+    'sweet': dict(high_base=0x100000000, high_size=0xfcc00000,
+                  fb=0x9c000000, fb_size=0x1700000, fb_w=1080, fb_h=2400,
+                  soc='qcom,sm7150'),
+    'enchilada': dict(high_base=0x180000000, high_size=0xfcba0000,
+                      fb=0x9d400000, fb_size=0x2400000, fb_w=1080, fb_h=2280,
+                      soc='qcom,sdm845'),
+}
 # /arm-io children are relative to this; it must not be 0 (serial_init bails)
 SOC_BASE = 0x01000000
 
@@ -74,9 +82,10 @@ def node(name, props=(), children=()):
     return n
 
 
-def build(seed=None, qemu=False, highmem=False):
+def build(seed=None, qemu=False, highmem=False, board='sweet'):
     """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
-    phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
+    b = BOARDS[board]
+    phys_base, mem_size = (b['high_base'], b['high_size']) if highmem else (PHYS_BASE, MEM_SIZE)
     # Carve the panic log off the top so the kernel never allocates over it.
     panic_base = phys_base + mem_size - PANIC_LOG_SIZE
     mem_size -= PANIC_LOG_SIZE
@@ -191,10 +200,10 @@ def build(seed=None, qemu=False, highmem=False):
 
     fbcon = node('sweet-fbcon', [
         ph(),
-        ('reg', u64(FB, FB_SIZE)),
-        ('width', u32(FB_W)),
-        ('height', u32(FB_H)),
-        ('stride', u32(FB_STRIDE)),
+        ('reg', u64(b['fb'], b['fb_size'])),
+        ('width', u32(b['fb_w'])),
+        ('height', u32(b['fb_h'])),
+        ('stride', u32(b['fb_w'] * 4)),
     ])
 
     # bsd/dev/sweet_ufs.c: the UFS host ABL leaves running (absolute physical reg).
@@ -231,7 +240,7 @@ def build(seed=None, qemu=False, highmem=False):
     # (iPhone10,3). 'xiaomi,sweet' stays for SweetPlatformExpert matching.
     return node('device-tree', [
         ph(),
-        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + cstr('xiaomi,sweet') + cstr('qcom,sm7150') + cstr('AppleARM')),
+        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + cstr('xiaomi,sweet') + cstr(b['soc']) + cstr('AppleARM')),
         ('model', cstr('iPhone10,3')),
         ('target-type', cstr('D22')),
         ('target-sub-type', cstr('D22AP')),
@@ -242,7 +251,12 @@ def build(seed=None, qemu=False, highmem=False):
 
 
 if __name__ == '__main__':
-    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv)
+    board = 'sweet'
+    if '--board' in sys.argv:
+        board = sys.argv[sys.argv.index('--board') + 1]
+        if board not in BOARDS:
+            raise SystemExit(f'--board must be one of {sorted(BOARDS)}')
+    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv, board=board)
     blob = adt.serialize(root)
     open(sys.argv[1], 'wb').write(blob)
     if '--dump' in sys.argv:

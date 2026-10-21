@@ -56,8 +56,27 @@ started. Target tree (read-only reference, outside the repo):
   the restart reason to sweet's IMEM address (0x146aa65c); SDM845's is
   `qcom,msm-imem@146bf000 + restart_reason@65c = 0x146bf65c` (from the OP6 DTB).
   `IMEM_RESTART_REASON` now lives in `shim/board.h` per board; the rebuilt image
-  is `4aa6b996...72d2` (reset path not retested yet). The on-screen MEMBASE/MEMSIZE/SPLASH/UFS
-  values have not been recorded yet.
+  is `4aa6b996...72d2` (reset path not retested yet).
+- **Diagnostic values from the phone screen (photo, 2026-10-21):**
+  - `DTB 0x853FD000`, magic `D00DFEED`; INITRD `0x855FE000..0x855FE044`.
+  - Two memory ranges: `0x80000000/0x100000000` (2-6 GiB) and
+    **`0x180000000/0xFCBA0000`** (6-9.95 GiB). This is the high bank XNU must
+    use (sweet uses 0x100000000); the device is the 8 GB model.
+  - `SPLASH 0x9D400000`, `SPLSIZE 0x2400000`: the ABL continuous-splash buffer
+    is live and writable (the shim console displayed normally), even though the
+    panel is cmd-mode.
+  - UFS is the same host generation as sweet: ver 0x210, cap 0x1587031F,
+    hce 1, hcs 0x10F, nutrs 0x20; ABL's UTRL 0x9BAA8000, ours 0x80095000;
+    TUR/CAP/READ all rc 0. LUN0 `lastlba 0x1D06FFF`, blk 0x1000.
+  - GPT: 32 entries @LBA 2. `op2` 0x2308/0x100 MiB, `system_a` 0x14F40/0xB2C,
+    `system_b` 0xC7B40/0xB2C, `odm_a` 0x17A740/0x64, `odm_b` 0x180B40/0x64,
+    **`userdata` lba 0x1B6F40, 0x1B800 MiB (~110 GiB), ext4**. So the iOS root
+    goes into `userdata` exactly as on sweet (same GPT-name lookup).
+- `tools/mkadt.py` now takes `--board sweet|enchilada`; enchilada selects
+  highmem base 0x180000000 / size 0xFCBA0000, FB 0x9d400000 / 0x2400000,
+  1080x2280 and `qcom,sdm845` (the `xiaomi,sweet` name is kept: the platform
+  expert matches it). Verified that the sweet ADT serialization is unchanged
+  for the same seed.
 
 **NEXT (in order):**
 1. `fastboot boot shim/out/shim-boot-enchilada-diag.img` on the OP6. Expected on
