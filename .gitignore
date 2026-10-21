@@ -13,6 +13,6 @@ xnu/*.zip
 logs/
 *.ipsw
 ipsw/
-/\*.zip
+/*.zip
 edl_config.json
 log.txt
