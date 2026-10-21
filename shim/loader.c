@@ -138,6 +138,11 @@ const char *loader_boot(uintptr_t dtb)
 
 	uintptr_t entry_pa = p->entry_va + pa_of_va_base;
 	con_hex("JUMP", entry_pa);
+	/* The Qualcomm APCS watchdog (bark-time 11 s in the OP6 DTS) resets
+	 * the SoC while a panic is on screen. Disable it so panics stay. */
+	*(volatile uint32_t *)(0x17980000UL + 0x08) = 0;	/* WDT0_EN */
+	__asm__ volatile("dsb sy" ::: "memory");
+	con_str("WDT", "APCS disabled");
 	con_str("XNU", "jumping (fbcon clears screen)");
 
 	/* Everything was written with the MMU and caches off; drop any stale I-cache lines too. */
