@@ -77,6 +77,27 @@ started. Target tree (read-only reference, outside the repo):
   1080x2280 and `qcom,sdm845` (the `xiaomi,sweet` name is kept: the platform
   expert matches it). Verified that the sweet ADT serialization is unchanged
   for the same seed.
+- **EDL backup DONE (2026-10-22 ~00:49):** `backup/enchilada-edl-20261021/`
+  (gitignored), **818 MB, 101 .bin** + per-LUN `rawprogram*.xml` +
+  `SHA256SUMS`. Verified from the repo root with
+  `sha256sum -c backup/enchilada-edl-20261021/SHA256SUMS`. Covers
+  persist/misc/keystore/frp, boot_a/b, dtbo_a/b, vbmeta_a/b, abl_a/b,
+  xbl(+config)_a/b, aop/devcfg/hyp/keymaster/cmnlib*/qupfw/tz/storsec,
+  modem_a/b, dsp, bluetooth, mdtp*, devinfo/sec/dip/apdp/msadp,
+  modemst1/2/fsg/fsc (LUN 5), LOGO/fw_* /splash. Skipped: userdata, op1/op2,
+  system/vendor/product/odm (A/B), cache/metadata and the logs.
+- EDL lessons: OP6 is Sahara v2, HWID `0x0008b0e10051459b`; edl auto-detected
+  **Loaders/oneplus/0008b0e10051459b_dd7c5f2e53176bee_fhprg_op6t.bin**. The
+  generic `qualcomm/factory/sdm845_*` loaders do not work here. Without
+  `--loader` edl hangs in auto-detect; with `--loader` on a fresh EDL it
+  uploads once, then later commands must run **without** `--loader` while the
+  firehose loader stays resident. The first attempts failed because the phone
+  was in CrashDump/Sahara memory-debug (HELLO mode 2); a full 10-15 s power
+  cycle before Vol+/Vol- + USB gives a normal mode.
+- GPT layout: LUN0 = persist/misc/param/keystore/frp/op2/system_a,b/odm_a,b/
+  userdata; LUN1/2 = xbl_a/b; LUN3 = cdt/ddr; LUN4 = boot/dtbo/vbmeta/abl/
+  modem/dsp/keymaster/cmnlib*/tz/vendor...; LUN5 = modemst1/2/fsg/fsc.
+  userdata offset `0x186f40000`, length `0x1b800bb000` (~110 GiB).
 
 **NEXT (in order):**
 1. `fastboot boot shim/out/shim-boot-enchilada-diag.img` on the OP6. Expected on

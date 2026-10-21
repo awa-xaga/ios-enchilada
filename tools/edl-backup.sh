@@ -13,13 +13,17 @@
 set -euo pipefail
 
 [[ $# -ge 1 ]] || { sed -n '2,13p' "$0"; exit 2; }
-loader=$(realpath "$1")
 root=$(cd "$(dirname "$0")/.." && pwd)
+loader_opt=()
+if [[ $1 != - ]]; then
+	loader=$(realpath "$1")
+	loader_opt=(--loader="$loader")
+fi
 out=${2:-$root/backup/enchilada-edl-$(date +%Y%m%d-%H%M%S)}
 edl=$root/edl/edl-master/edl.py
 py=${PY:-$root/edl/venv/bin/python}
 
-[[ -f $loader ]] || { echo "no such loader: $loader" >&2; exit 1; }
+[[ -z ${loader:-} || -f $loader ]] || { echo "no such loader: $loader" >&2; exit 1; }
 [[ -f $edl ]] || { echo "missing $edl (download bkerler/edl)" >&2; exit 1; }
 [[ -x $py ]] || py=python3
 lsusb | grep -q '05c6:9008' || { echo "phone is not in EDL (no 05c6:9008)" >&2; exit 1; }
@@ -29,16 +33,17 @@ lsusb | grep -q '05c6:9008' || { echo "phone is not in EDL (no 05c6:9008)" >&2; 
 skip='userdata,super,system_a,system_b,vendor_a,vendor_b,product_a,product_b,odm_a,odm_b,op1,op2,cache,metadata,logfs,logdump,minidump,rawdump'
 mkdir -p "$out"
 
-echo "loader: $loader" | tee "$out/BACKUP.txt"
+echo "loader: ${loader:-(already in firehose)}" | tee "$out/BACKUP.txt"
 echo "out:    $out" | tee -a "$out/BACKUP.txt"
-sha256sum "$loader" | tee -a "$out/BACKUP.txt"
+[[ -n ${loader:-} ]] && sha256sum "$loader" | tee -a "$out/BACKUP.txt"
 
-"$py" "$edl" rl "$out" --loader="$loader" --memory=ufs --skip="$skip" --genxml \
+"$py" "$edl" rl "$out" "${loader_opt[@]}" --memory=ufs --skip="$skip" --genxml \
 	2>&1 | tee "$out/rl.log"
 
-if [[ -f $out/gpt_main0.bin ]]; then
-	"$py" "$root/tools/gpt-list.py" "$out/gpt_main0.bin" | tee "$out/partitions.txt"
-fi
+shopt -s nullglob
+for f in "$out"/gpt_main*.bin "$out"/lun*/gpt_main*.bin; do
+	"$py" "$root/tools/gpt-list.py" "$f"
+done | tee "$out/partitions.txt"
 
-(cd "$out" && sha256sum *.bin > SHA256SUMS)
+find "$out" -name '*.bin' -print0 | sort -z | xargs -0 sha256sum > "$out/SHA256SUMS"
 echo "done: $out" >&2

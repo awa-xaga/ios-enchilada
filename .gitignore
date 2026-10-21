@@ -10,3 +10,4 @@ xnu/out-*/
 __pycache__/
 edl/
 xnu/*.zip
+logs/
