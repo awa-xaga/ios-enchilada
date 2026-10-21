@@ -34,9 +34,25 @@ after boot, not a kernel panic (`/pram` stays zero) and not the CPU count
   print). Backups: `backup/enchilada-edl-20261021/` (818 MB, 101 partitions,
   SHA256SUMS). EDL loader: `Loaders/oneplus/..._fhprg_op6t.bin`.
 
-**NEXT:** run CI for 0082, download `xnu-kernel`, rebuild the payload with the
-new pram ADT + shim SCM/WDT and boot cpus=1; expect no 900E. Then read `/pram`
-on any panic (low address) and attack the CA/software-renderer path.
+**TOPaz FINDINGS (github.com/MakrSas/ios-topaz, branch `topaz`):** a newer
+port of this project (Redmi Note 12 4G, SM6225) that reaches the home screen.
+- patch **0138-topaz-empty-ioacceleratores** is the CA fix: QuartzCore polls
+  IOServiceMatching("IOAcceleratorES") 300x100 ms (30 s) at every backboardd
+  start; publishing an empty IOAcceleratorES ends the wait and keeps the CPU
+  renderer. Ported here as **0083-sweet-empty-ioacceleratores.patch**.
+- 0088-topaz-gpt-watchdog is unrelated (GPT tamper detection), not the APCS
+  reset. 0131-0137/0139 are SweetSurface/GL renderer fixes; 0092-0107 are
+  topaz MDP/DSI scanout (not needed for the OP6's AppleCLCD copy path).
+  topaz's mkadt.py omits /pram entirely; its sweet-root-tweaks.py is identical
+  to ours. Its kbuild.sh is only a CI download/pack helper.
+- next kernel build should have both 0082 (APCS pet) and 0083 (empty accel).
+
+**NEXT:** run CI for 0082+0083, download `xnu-kernel`, rebuild the payload
+with the new pram ADT + shim SCM/WDT and boot cpus=1; expect no 900E and no
+30 s GPU wait. Then read `/pram` on any panic (low address) and look for the
+first `SWEET FB: swap`/IOSurface create; if CA still does not draw, port topaz
+0131-0137/0139. Push access is still the blocker (awa-xaga cannot push to
+dipa-studio/ios-sweet).
 
 
 **STATE:** no phone is attached on this machine (`fastboot devices` empty) and the
