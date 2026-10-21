@@ -1,0 +1,45 @@
+--- a/bsd/dev/sweet_keys.c
++++ b/bsd/dev/sweet_keys.c
+@@ -115,6 +115,27 @@
+ 	}
+ }
+ 
++extern void sweet_hid_touch(int finger, int down, int x, int y);
++
++/* No touch driver yet: optionally unlock the iPhone X lock screen with a
++ * synthetic bottom-edge swipe. sweetswipetest=N waits N seconds. */
++static void
++sweet_swipe_thread(void *arg, wait_result_t result)
++{
++	int secs = (int)(uintptr_t)arg;
++	(void)result;
++	for (int i = 0; i < secs; i++) {
++		keys_sleep(1000);
++	}
++	printf("SWEET HID: synthetic unlock swipe (panel 1080x2280)\n");
++	sweet_hid_touch(0, 1, 540, 2200);
++	for (int i = 1; i <= 20; i++) {
++		sweet_hid_touch(0, 1, 540, 2200 - i * 70);
++		keys_sleep(20);
++	}
++	sweet_hid_touch(0, 0, 540, 800);
++}
++
+ static void
+ keys_thread(void *arg, wait_result_t result)
+ {
+@@ -162,6 +183,14 @@
+ 	} else {
+ 		printf("SWEET WDT: thread start failed\n");
+ 	}
++	int swipe = 0;
++	if (PE_parse_boot_argn("sweetswipetest", &swipe, sizeof(swipe)) && swipe > 0) {
++		if (kernel_thread_start(sweet_swipe_thread, (void *)(uintptr_t)swipe, &thread) == KERN_SUCCESS) {
++			thread_deallocate(thread);
++		} else {
++			printf("SWEET HID: swipe thread start failed\n");
++		}
++	}
+ 	(void)PE_parse_boot_argn("sweetkeys", &enabled, sizeof(enabled));
+ 	if (!enabled) {
+ 		printf("SWEET KEYS: disabled (sweetkeys=0)\n");
