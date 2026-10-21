@@ -13,7 +13,6 @@
 #include "ufs.h"
 #include "fdt.h"
 
-#define IMEM_RESTART_REASON	0x146aa65cUL	/* qcom,msm-imem restart_reason@65c */
 #define RESTART_BOOTLOADER	0x77665500U
 #define PSHOLD			0x0c264000UL
 

@@ -46,10 +46,18 @@ started. Target tree (read-only reference, outside the repo):
   DTB tail equals the reference tail.
 - **Diagnostic image (no XNU payload, DTB/UFS/FB probe only):**
   `shim/out/shim-boot-enchilada-diag.img`, 1,126,400 bytes, SHA256
-  `e337b904551c1fbe6c23b3ade9f30cc17c7c539f0bf8b49f484a504fe501c157`
+  `4aa6b996d08e2a79b14c38914981179fc8e9900fc6842508f5b2d48ff8cc72d2`
   (`BOARD=enchilada ./build.sh` then
   `python3 tools/mkenchilada.py --kernel-gz-dtb .../Image.gz-dtb --out out/shim-boot-enchilada-diag.img`;
   the AOSP kernel object may be rebuilt, so re-run both after changes).
+- **CONFIRMED ON THE PHONE (2026-10-21):** `fastboot boot` of the diagnostic
+  image displayed the shim console on the OP6 (user: "显示了", display normal).
+  After ~3 min it entered Qualcomm **900E** instead of fastboot: `reset()` wrote
+  the restart reason to sweet's IMEM address (0x146aa65c); SDM845's is
+  `qcom,msm-imem@146bf000 + restart_reason@65c = 0x146bf65c` (from the OP6 DTB).
+  `IMEM_RESTART_REASON` now lives in `shim/board.h` per board; the rebuilt image
+  is `4aa6b996...72d2` (reset path not retested yet). The on-screen MEMBASE/MEMSIZE/SPLASH/UFS
+  values have not been recorded yet.
 
 **NEXT (in order):**
 1. `fastboot boot shim/out/shim-boot-enchilada-diag.img` on the OP6. Expected on
