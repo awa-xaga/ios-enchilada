@@ -3,6 +3,35 @@
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-21: OnePlus 6 (enchilada, SDM845) port started <<<
+### >>> 2026-10-22 ~04:35: iOS LOCK SCREEN ON THE ONEPLUS 6 (milestone) <<<
+
+**The OnePlus 6 now shows the iOS 16 lock screen.** Kernel **0083** (0082
+APCS pet + 0083 empty IOAcceleratorES), `pram=0x100000000`, shim with the
+SCM/WDT disable, `cpus=1`, `sweetfb_noconsole=1`, `sweetfb_hz=30`, iOS root
+v? flashed in userdata. Worked image:
+`shim/out/shim-boot-enchilada-0083-pram100.img`, sha256
+`ccff345bfdd9f04dd9722736a876c14743e16bb905b4a0f262eef7170078a2d9`.
+6+ minutes without 900E (the pet works); the lock screen is drawn by
+backboardd/CoreAnimation via AppleCLCD.
+
+- Kernel CI: `awa-xaga/ios-enchilada` (public), run **39667783540**, HEAD
+  `3b2ed41`; kernel symbols `_sweet_wdt_thread`, `IOAcceleratorES` verified.
+- **`/pram` address matters:** 0x27CAA0000 (top of the high bank) and
+  0x17ff00000 (1 MiB below phys_base) both hung the early boot; the tested
+  **0x100000000** works. `tools/mkadt.py` now uses per-board pram addresses:
+  enchilada 0x100000000, sweet none (v15 had no /pram), QEMU 0x0b000000, with
+  the top 1 MiB still reserved (`dram-size = high_size - 1 MiB`).
+- Topaz fixes adopted: **0083** is topaz 0138 (empty IOAcceleratorES ends the
+  30 s CAMetalContextCreate wait). 0088-topaz-gpt-watchdog is unrelated.
+- **No input yet:** Synaptics S3320 touch (I2C SE12 0xa90000, addr 0x20, IRQ
+  tlmm 125, reset 99, 1v8 88, AVDD pm8998_l28) and PM8998 keys (PON@800,
+  GPIO6 vol+, GPIO5 vol-) are not ported. The lock screen cannot be unlocked
+  from the phone. The display may auto-lock/fade (patch 0079).
+
+**NEXT:** (a) quick: synthetic swipe (`sweet_hid_touch`) after boot to unlock
+and see SpringBoard/home; (b) real: port the Synaptics RMI4 driver + PM8998
+keys, then cpus=4. Both need a kernel build (awa-xaga CI works).
+
 ### >>> UPDATE 2026-10-22: enchilada iOS userland runs; watchdog + pram ***
 
 **STATE:** the iOS 16 root is flashed into the OP6 userdata and XNU boots to the

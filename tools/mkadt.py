@@ -26,10 +26,10 @@ PANIC_LOG_SIZE = 0x100000
 BOARDS = {
     'sweet': dict(high_base=0x100000000, high_size=0xfcc00000,
                   fb=0x9c000000, fb_size=0x1700000, fb_w=1080, fb_h=2400,
-                  soc='qcom,sm7150'),
+                  soc='qcom,sm7150', pram=None),
     'enchilada': dict(high_base=0x180000000, high_size=0xfcba0000,
                       fb=0x9d400000, fb_size=0x2400000, fb_w=1080, fb_h=2280,
-                      soc='qcom,sdm845'),
+                      soc='qcom,sdm845', pram=0x100000000),
 }
 # /arm-io children are relative to this; it must not be 0 (serial_init bails)
 SOC_BASE = 0x01000000
@@ -86,11 +86,13 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
     """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
     b = BOARDS[board]
     phys_base, mem_size = (b['high_base'], b['high_size']) if highmem else (PHYS_BASE, MEM_SIZE)
-    # Keep the panic log in the low bank just below the kernel's dram range.
-    # The top of the high bank hung check_for_panic_log() on enchilada
-    # (0x27CAA0000: the mapping/zeroing of that address never returned); the
-    # 1 MiB below phys_base is unused RAM on both boards.
-    panic_base = phys_base - PANIC_LOG_SIZE
+    # The panic log must live at an address that check_for_panic_log() can map
+    # and bzero. The top of the high bank hung on enchilada (0x27CAA0000), as
+    # did 1 MiB below phys_base (0x17ff00000); 0x100000000 (the middle of the
+    # OP6 low bank) is the tested address. sweet's v15 image had no /pram at
+    # all and booted, so keep it absent there (QEMU gets a low one).
+    pram_addr = 0x0b000000 if qemu else b['pram']
+    mem_size -= PANIC_LOG_SIZE
     gicd, gicr, timebase = (QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE) if qemu else (GICD, GICR, TIMEBASE)
     seed = seed if seed is not None else os.urandom(64)
     phandle = iter(range(1, 1000))
@@ -102,7 +104,7 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
         ('dram-size', u64(mem_size)),
         ('random-seed', seed),
         ('debug-enabled', u32(1)),
-        ('embedded-panic-log-size', u32(PANIC_LOG_SIZE)),
+        *(([('embedded-panic-log-size', u32(PANIC_LOG_SIZE))]) if pram_addr else []),
         ('firmware-version', cstr('sweet-shim')),
         ('system-firmware-version', cstr('sweet-shim')),
         # iBoot's SHA-384 of the boot manifest; /sbin/mount -P 1 exits unless
@@ -235,7 +237,7 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
 
     # Panic log region. /pram reg = <phys size>; it sits just above the
     # dram-size we expose, so XNU maps it but never allocates into it.
-    pram = node('pram', [ph(), ('reg', u64(panic_base) + u64(PANIC_LOG_SIZE))])
+    pram = node('pram', [ph(), ('reg', u64(pram_addr) + u64(PANIC_LOG_SIZE))]) if pram_addr else None
 
     # Identity of the iPhone X whose userland runs here: compatible[0] is
     # hw.model/hw.target (D22AP), model is hw.machine/hw.product
@@ -249,7 +251,7 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons, pram] + product + ([] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + ([pram] if pram else []) + product + ([] if qemu else [ufs]))
 
 
 if __name__ == '__main__':
