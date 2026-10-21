@@ -2,6 +2,69 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### >>> UPDATE 2026-10-21: OnePlus 6 (enchilada, SDM845) port started <<<
+
+**STATE:** no phone is attached on this machine (`fastboot devices` empty) and the
+`/run/media/dipa` SSD from the sweet notes is not mounted, so nothing below has
+been booted. The repo had no `shim/out`, `xnu/out-*` or Apple artifacts when this
+started. Target tree (read-only reference, outside the repo):
+`/media/disk-a/uwuaosp17` (AOSP 17, kernel `kernel/oneplus/sdm845`).
+
+- The 4.19 build is **not** the kernel for this port. XNU replaces it; the AOSP
+  `boot.img`/`Image.gz-dtb` is only the container/DTB source. The phone's ABL
+  already accepts that container (header v1, kernel 0x8000, ramdisk 0x1000000,
+  tags 0x100, pagesize 4096, os_version 0x220001a8 = 17.0.0 / 2026-08).
+- Reference `Image.gz-dtb`: gzip stream + **3 appended FDTs** (1,110,175 bytes in
+  total; first FDT found by decompressing the gzip and taking `unused_data`).
+- Hardware from the kernel source/DTS (observations, not yet verified on device):
+  - Framebuffer: `reserved-memory/cont_splash_region@0x9d400000`, size 0x2400000;
+    panel 1080x2280. Default panel node `dsi_samsung_sofef00_m_cmd`
+    (`enchilada.dtsi:449`); also s6e3fc1 / s6e3fc2x01 / sofeg01 / DSC variants.
+  - Touch: Synaptics S3320 RMI (`HWK,synaptics,s3320`), I2C SE12 at `0xa90000`,
+    address 0x20, IRQ tlmm 125, reset tlmm 99, 1v8 tlmm 88, AVDD pm8998_l28
+    (`enchilada.dtsi:244`, `sdm845-qupv3.dtsi:529`). Not Goodix: `sweet_touch.c`
+    cannot be reused; reference driver `drivers/input/touchscreen/synaptics_driver_s3320.c`.
+  - Keys: power = PM8998 PON `@800`; volume+ = PM8998 GPIO6; volume- = PM8998
+    GPIO5; tri-state key tlmm 24/52/126. (sweet uses PM6150/PM6150L.)
+  - Same-as-sweet addresses: UFS `0x1d84000`, GICD `0x17a00000`, GICR
+    `0x17a60000`, 19.2 MHz timer, SPMI `0xc440000`, RPMh RSC `0x179c0000`,
+    DWC3 `0xa600000` with QSCRATCH `+0xf8800`.
+- **shim changes** (BOARD=enchilada; sweet remains the default):
+  - new `shim/board.h`: `FB_PHYS 0x9d400000`, `FB_W 1080`, `FB_H 2280`;
+    `console.h`/`mmu.h` include it instead of defining the sweet values.
+  - `shim/build.sh`: `BOARD=sweet|enchilada` (`-DBOARD_*`), host_test gets the
+    same define, `mkbootimg` is optional, and the `awk strtonum` (missing in
+    mawk) was replaced with bash `16#`. For enchilada it stops at `out/Image`.
+  - `shim/fdt.c/h`: `fdt_node_prop()` + `fdt_node_reg64()` (2/2 and 1/1 cells).
+    `shim.c` now prints `DTB`, `MEMBASE`/`MEMSIZE` (up to 2 memory ranges) and
+    `SPLASH`/`SPLSIZE` from the live FDT before trying the payload.
+- new `tools/mkenchilada.py`: takes the AOSP `Image.gz-dtb`, splits off the DTB
+  table with zlib (gzip end + `unused_data`), prepends `gzip(shim)` and writes a
+  header-v1 boot.img with an XNU payload as the ramdisk (empty newc cpio without
+  `--payload`). `--template boot.img` copies the stock header/cmdline. Verified:
+  the decompressed kernel equals `shim/out/Image` byte-for-byte and the appended
+  DTB tail equals the reference tail.
+- **Diagnostic image (no XNU payload, DTB/UFS/FB probe only):**
+  `shim/out/shim-boot-enchilada-diag.img`, 1,126,400 bytes, SHA256
+  `e337b904551c1fbe6c23b3ade9f30cc17c7c539f0bf8b49f484a504fe501c157`
+  (`BOARD=enchilada ./build.sh` then
+  `python3 tools/mkenchilada.py --kernel-gz-dtb .../Image.gz-dtb --out out/shim-boot-enchilada-diag.img`;
+  the AOSP kernel object may be rebuilt, so re-run both after changes).
+
+**NEXT (in order):**
+1. `fastboot boot shim/out/shim-boot-enchilada-diag.img` on the OP6. Expected on
+   the splash: `SHIM enchilada xnu loader`, `DTB`, `MEMBASE/MEMSIZE`,
+   `SPLASH/SPLSIZE`, then the UFS probe (read-only) and reset after ~3 min.
+   If the screen stays black, the cmd-mode panel probably does not refresh the
+   ABL buffer (writing cont_splash memory may not be enough); next output channel
+   is a shim-side UFS write log in a spare block, or USB.
+2. If it boots: add `mkadt.py --board enchilada` (FB 0x9d400000, 2280, dot pitch
+   402 vs sweet 395) and build a payload with XNU 0081. This machine currently has
+   no `research/ipsw-x/d22ap.adt` (the `/product` source) and no `xnu/out-0081`,
+   so the iPhone X root/IPSW artifacts have to be located or downloaded first.
+3. Then: GPT `userdata` root over UFS (same base as sweet), Synaptics RMI driver,
+   PM8998 keys, and only then the display/GUI path.
+
 ### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<
 
 **STATE at end of 2026-10-18 (evening):**

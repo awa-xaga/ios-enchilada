@@ -11,6 +11,7 @@
 #include "mmu.h"
 #include "loader.h"
 #include "ufs.h"
+#include "fdt.h"
 
 #define IMEM_RESTART_REASON	0x146aa65cUL	/* qcom,msm-imem restart_reason@65c */
 #define RESTART_BOOTLOADER	0x77665500U
@@ -377,8 +378,26 @@ void shim_main(uint64_t dtb)
 	/* An xnu payload in the ramdisk means: boot it (MMU stays off). */
 	stage = "loader";
 	con_clear(RED);
-	con_str("SHIM", "sweet milestone 4: xnu loader");
+	con_str("SHIM", BOARD_NAME " xnu loader");
 	con_skip();
+
+	/* Board bring-up: what did ABL actually hand us? */
+	con_hex("DTB", dtb);
+	con_hex("DTBMAGIC", dtb ? __builtin_bswap32(rd32(dtb)) : 0);
+	for (int i = 0; i < 2; i++) {
+		uint64_t a, s;
+		if (!fdt_node_reg64(dtb, "memory", i, &a, &s))
+			break;
+		con_hex("MEMBASE", a);
+		con_hex("MEMSIZE", s);
+	}
+	uint64_t sa, ss;
+	if (fdt_node_reg64(dtb, "cont_splash_region", 0, &sa, &ss)) {
+		con_hex("SPLASH", sa);
+		con_hex("SPLSIZE", ss);
+	}
+	con_skip();
+
 	const char *why = loader_boot(dtb);
 	con_str("LOADER", why);
 	con_skip();

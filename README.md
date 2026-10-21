@@ -8,6 +8,10 @@ As of **2026-10-18** the phone boots to the **iOS home screen**. You can unlock 
 
 > Experimental bring-up, not a usable phone OS. Many things are missing or stubbed (see below), and Apple's security model is mostly switched off. It installs into the `userdata` partition and so **erases Android's user data**.
 
+A port to the OnePlus 6 (`enchilada`, SDM845) is in bring-up; the first shim
+changes and boot-image packer are in the tree, but it has not booted yet. See
+[`NOTES.md`](NOTES.md).
+
 ## What works
 
 | Area | State |
@@ -151,6 +155,7 @@ The log contains crash reports with backtraces (`CRASH name ...`), IOKit traces 
 | `.github/workflows/xnu.yml` | Kernel CI build |
 | `tools/mkadt.py` | Generates the Apple Device Tree from sweet's MMIO layout and the iPhone X identity |
 | `tools/mkpayload.py` | Packs kernel + ADT + boot-args into the shim payload |
+| `tools/mkenchilada.py` | Packs the shim into an OnePlus 6 boot.img (header v1, ABL DTB table) |
 | `tools/mkiosroot.sh` | Builds the HFS+ iOS root from the IPSW images |
 | `tools/sweet-root-tweaks.py` | Bring-up changes to the root (Setup skip, activation, daemons) |
 | `tools/sweet-log-pull.sh`, `sweet-log.py` | Read the persistent kernel log from recovery |
