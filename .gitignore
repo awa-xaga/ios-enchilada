@@ -11,3 +11,5 @@ __pycache__/
 edl/
 xnu/*.zip
 logs/
+*.ipsw
+ipsw/
