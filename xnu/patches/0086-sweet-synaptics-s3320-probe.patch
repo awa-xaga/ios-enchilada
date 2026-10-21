@@ -1,0 +1,181 @@
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -76,6 +76,7 @@
+ 	bool started, dead, probing;
+ 	int kind, irq_hint;
+ 	uint32_t irq_status, irq_last, active;
++	uint32_t rcg, branch, vote_mask;
+ 	unsigned sent, got;
+ 	int x[TOUCH_MAX], y[TOUCH_MAX];
+ } st;
+@@ -137,15 +138,15 @@
+ touch_clocks(void)
+ {
+ 	/* Vote on only wrapper1 and SE7, preserving other clock users. */
+-	uint32_t mask = (0x0fu << 18) | (1u << 23);
++	uint32_t mask = st.vote_mask;
+ 	touch_wr(st.gcc, TOUCH_GCC_VOTE, touch_rd(st.gcc, TOUCH_GCC_VOTE) | mask);
+-	uint32_t dfs = touch_rd(st.gcc, TOUCH_RCG + 0x14u);
+-	uint32_t cfg = touch_rd(st.gcc, TOUCH_RCG + 4u);
++	uint32_t dfs = touch_rd(st.gcc, st.rcg + 0x14u);
++	uint32_t cfg = touch_rd(st.gcc, st.rcg + 4u);
+ 	printf("SWEET TOUCH: gcc vote=%#x rcg=%#x cfg=%#x dfs=%#x\n",
+-	    touch_rd(st.gcc, TOUCH_GCC_VOTE), touch_rd(st.gcc, TOUCH_RCG), cfg, dfs);
++	    touch_rd(st.gcc, TOUCH_GCC_VOTE), touch_rd(st.gcc, st.rcg), cfg, dfs);
+ 	if (dfs & 1u) {
+ 		/* SE CLK_SEL=0 selects DFS performance level 0. Do not alter tables. */
+-		cfg = touch_rd(st.gcc, TOUCH_RCG + 0x1cu);
++		cfg = touch_rd(st.gcc, st.rcg + 0x1cu);
+ 		if ((cfg & 0x371fu) != 1u) {
+ 			printf("SWEET TOUCH: DFS level0=%#x is not XO/1; need clock integration\n", cfg);
+ 			return false;
+@@ -153,14 +154,14 @@
+ 	} else {
+ 		/* XO parent 0, HID divider 1 => 19.2 MHz. No PLL or voltage change. */
+ 		cfg = (cfg & ~(0x371fu | (1u << 20))) | 1u;
+-		touch_wr(st.gcc, TOUCH_RCG + 4u, cfg);
+-		touch_wr(st.gcc, TOUCH_RCG, touch_rd(st.gcc, TOUCH_RCG) | 1u);
+-		if (!touch_wait_clear(st.gcc, TOUCH_RCG, 1u)) {
++		touch_wr(st.gcc, st.rcg + 4u, cfg);
++		touch_wr(st.gcc, st.rcg, touch_rd(st.gcc, st.rcg) | 1u);
++		if (!touch_wait_clear(st.gcc, st.rcg, 1u)) {
+ 			printf("SWEET TOUCH: RCG update timeout\n");
+ 			return false;
+ 		}
+ 	}
+-	const uint32_t branches[] = {0x18004, 0x18008, 0x1800c, 0x18010, 0x18144};
++	const uint32_t branches[] = {0x18004, 0x18008, 0x1800c, 0x18010, st.branch};
+ 	for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
+ 		if (!touch_wait_clear(st.gcc, branches[i], 1u << 31)) {
+ 			printf("SWEET TOUCH: GCC branch %#x halted (%#x)\n", branches[i],
+@@ -545,12 +546,120 @@
+ 	return true;
+ }
+ 
++/*
++ * OnePlus 6 (enchilada) Synaptics S3320: DSX-style RMI4 (1-byte register +
++ * 0xff page select), I2C SE12 at 0xa90000 (pins GPIO49/50, RCGR 0x184d8),
++ * GPIO 99 reset / 88 1v8 / 125 irq, AVDD PM8998 LDOA28 via RPMh.
++ * Boot-arg sweettsyn=1 selects this probe instead of the sweet Goodix/FTS.
++ */
++#define SYN_SE_PA       0x00a90000u
++#define SYN_RCG         0x184d8u
++#define SYN_BRANCH      0x184d4u
++#define SYN_TLMM_PA     0x03400000u
++#define SYN_I2C_ADDR    0x20u
++#define SYN_F12_MAP     0xDDu
++#define SYN_F01_MAP     0xE3u
++
++static void
++touch_syn_dump(const char *tag, const uint8_t *b, unsigned n)
++{
++	char line[3 * 16 + 1];
++	for (unsigned off = 0; off < n; off += 16) {
++		unsigned cnt = n - off > 16 ? 16 : n - off;
++		for (unsigned j = 0; j < cnt; ++j)
++			(void)snprintf(line + j * 3u, 4, "%02x ", b[off + j]);
++		line[cnt * 3] = 0;
++		printf("SWEET TOUCH: %s %#x: %s\n", tag, off, line);
++	}
++}
++
++static void
++touch_syn(void)
++{
++	unsigned delay_s = 10;
++	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
++	printf("SWEET TOUCH: S3320 probe in %u s\n", delay_s);
++	touch_wait(delay_s * 1000u);
++
++	st.se = ml_io_map(SYN_SE_PA, 0x4000);
++	st.gcc = ml_io_map(TOUCH_GCC_PA, 0x100000);
++	st.gpio = ml_io_map(SYN_TLMM_PA, 0x100000);
++	st.rcg = SYN_RCG;
++	st.branch = SYN_BRANCH;
++	st.vote_mask = (0x1fu << 18) | (1u << 23);
++	if (!st.se || !st.gcc || !st.gpio) {
++		printf("SWEET TOUCH: syn MMIO map failed\n");
++		return;
++	}
++	/* I2C pins GPIO49/50 (qup12), IRQ 125 input pull-up, 1v8 88, reset 99. */
++	touch_gpio(49, 1, 0, 2, false, false);
++	touch_gpio(50, 1, 0, 2, false, false);
++	touch_gpio(125, 0, 2, 2, false, false);
++	touch_gpio(88, 0, 2, 2, true, true);
++	touch_gpio(99, 0, 2, 2, true, false);
++	printf("SWEET TOUCH: syn gpio reset=%#x 1v8=%#x irq=%#x i2c=%#x/%#x\n",
++	    touch_rd(st.gpio, TOUCH_GPIO_IO(99)), touch_rd(st.gpio, TOUCH_GPIO_IO(88)),
++	    touch_rd(st.gpio, TOUCH_GPIO_IO(125)), touch_rd(st.gpio, TOUCH_GPIO_CFG(49)),
++	    touch_rd(st.gpio, TOUCH_GPIO_CFG(50)));
++	int l28 = sweet_rpmh_vreg_enable("ldoa28", 3008000);
++	printf("SWEET TOUCH: syn LDOA28 rc=%d\n", l28);
++	/* 1v8 up, reset low 10 ms, high 10 ms, then release. */
++	touch_wait(10);
++	touch_gpio(99, 0, 2, 2, true, true);
++	touch_wait(20);
++	if (!touch_clocks())
++		return;
++	if (!touch_se_init()) {
++		printf("SWEET TOUCH: syn SE12 firmware/status unusable\n");
++		return;
++	}
++	uint8_t w[2] = {0xff, 0x00};
++	int e = touch_msg(SYN_I2C_ADDR, w, 2, NULL, 0, false);
++	uint8_t f12[4] = {0}, f01[4] = {0};
++	int e12 = touch_read(SYN_I2C_ADDR, SYN_F12_MAP, false, f12, 4);
++	int e01 = touch_read(SYN_I2C_ADDR, SYN_F01_MAP, false, f01, 4);
++	printf("SWEET TOUCH: syn page=%d f12=%d %02x/%02x/%02x/%02x f01=%d %02x/%02x/%02x/%02x\n",
++	    e, e12, f12[0], f12[1], f12[2], f12[3], e01, f01[0], f01[1], f01[2], f01[3]);
++	if (e12) {
++		printf("SWEET TOUCH: syn no RMI4 map; stopping\n");
++		return;
++	}
++	/* F01 command 0x01 = reset, then wait for the map to come back. */
++	uint8_t cmd[2] = {f01[1], 0x01};
++	(void)touch_msg(SYN_I2C_ADDR, cmd, 2, NULL, 0, false);
++	touch_wait(60);
++	uint8_t d[64];
++	unsigned last0 = ~0u;
++	for (;;) {
++		int err = touch_read(SYN_I2C_ADDR, f12[3], false, d, sizeof(d));
++		if (err) {
++			printf("SWEET TOUCH: syn F12 data read err=%d\n", err);
++			touch_wait(500);
++			continue;
++		}
++		unsigned sig = ((unsigned)d[0] << 24) | ((unsigned)d[1] << 16) |
++		    ((unsigned)d[2] << 8) | d[54];	/* count candidates */
++		if (sig != last0) {
++			last0 = sig;
++			printf("SWEET TOUCH: syn F12 head %02x %02x %02x %02x  +54=%02x +55=%02x\n",
++			    d[0], d[1], d[2], d[3], d[54], d[55]);
++			touch_syn_dump("syn data", d, 16);
++		}
++		touch_wait(20);
++	}
++}
++
+ static void
+ touch_thread(void *arg, wait_result_t result)
+ {
+ 	unsigned delay_s = 45;
++	int syn = 0;
+ 	(void)arg;
+ 	(void)result;
++	if (PE_parse_boot_argn("sweettsyn", &syn, sizeof(syn)) && syn) {
++		touch_syn();
++		return;
++	}
+ 	/*
+ 	 * Start late (boot-arg sweettouchdelay, seconds): if the bus access
+ 	 * below hangs the SoC, the persistent log and the GUI got there first.
+@@ -561,6 +670,9 @@
+ 	printf("SWEET TOUCH: mapping GCC/TLMM/SE7\n");
+ 	st.gcc = ml_io_map(TOUCH_GCC_PA, 0x60000);
+ 	st.gpio = ml_io_map(TOUCH_NORTH_PA, 0x5b000);
++	st.rcg = TOUCH_RCG;
++	st.branch = 0x18144;
++	st.vote_mask = (0x0fu << 18) | (1u << 23);
+ 	st.se = ml_io_map(TOUCH_SE_PA, 0x4000);
+ 	if (!st.gcc || !st.gpio || !st.se) {
+ 		printf("SWEET TOUCH: MMIO mapping failed\n");
