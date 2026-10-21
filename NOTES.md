@@ -98,6 +98,24 @@ started. Target tree (read-only reference, outside the repo):
   userdata; LUN1/2 = xbl_a/b; LUN3 = cdt/ddr; LUN4 = boot/dtbo/vbmeta/abl/
   modem/dsp/keymaster/cmnlib*/tz/vendor...; LUN5 = modemst1/2/fsg/fsc.
   userdata offset `0x186f40000`, length `0x1b800bb000` (~110 GiB).
+- **iOS root built (2026-10-22 ~01:10)** from the iPhone10,3 16.7.16 (20H392)
+  IPSW (6,171,035,648 bytes): OS `087-86698-044.dmg` (4.73 GB), SystemOS
+  `087-86593-047.dmg` (2.74 GB), AppOS `087-86715-047.dmg` (10.5 MB) via
+  `tools/mkiosroot.sh ... 16G`, then `fsck -fy`, `sweet-root-tweaks.py`, fsck
+  again, img2simg. `ipsw/ios16-root-20H392.img` 16 GiB sha256
+  `d9ae0079...1abe84`; `.simg` 12 GiB sha256 `d526683a...6b7f4ead`
+  (both gitignored). The tweaks skipped the mobileactivationd data ark: its
+  system container does not exist in a fresh image yet (sweet v14 seeded it
+  after the container had been created).
+- `d22ap.adt` extracted from `Firmware/all_flash/DeviceTree.d22ap.im4p`: the
+  IM4P payload is LZFSE (`bvx2`), decoded with lzfse to a 186,084-byte ADT
+  (18 root children, /product has 68 properties) in
+  `research/ipsw-x/d22ap.adt`. `mkadt.py --board enchilada --highmem`
+  now emits a 12,772-byte ADT with /product.
+- Enchilada payload/boot built: `shim/out/sweet-0081hi.adt`,
+  `shim/out/payload-ench-0081.bin` (16,613,648 bytes, XNU 0081, cpus=1) and
+  `shim/out/shim-boot-enchilada.img` (17,739,776 bytes, sha256
+  `6b4c7a80b7b981290c9e65b0fec0dd07e2f9ceb1ee9170ee73262f7891da9125`).
 
 **NEXT (in order):**
 1. `fastboot boot shim/out/shim-boot-enchilada-diag.img` on the OP6. Expected on
