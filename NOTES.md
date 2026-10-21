@@ -3,6 +3,32 @@
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-21: OnePlus 6 (enchilada, SDM845) port started <<<
+### >>> 2026-10-22 input work (current handoff) <<<
+
+- **0084** (topaz 0085) ignores display-off with `sweetfb_stayon=1`;
+  **0085** injects a synthetic unlock swipe with `sweetswipetest=N`;
+  **0086** adds the **Synaptics S3320 probe** (`sweettsyn=1`).
+- 0086 commit `b38f10b`; CI run **39673681312** was queued when this note was
+  written. The 0084/0085 run 39672565033 completed, but its `xnu-kernel`
+  artifact download returned "no valid artifacts" (retry later; the 0086 run
+  contains 0084+0085 as well).
+- 0086 details: GENI **SE12 0xa90000**, RCGR **0x184d8**, branch **0x184d4**,
+  I2C pins GPIO49/50 (`qup12`), reset 99, 1v8 88, irq 125, AVDD PM8998
+  **LDOA28 via RPMh**; DSX-style RMI4 (1-byte register + 0xff page select),
+  F12 map at 0xdd, F01 map at 0xe3, F01 command 0x01 reset; prints the map
+  and the raw F12 data (no HID reports yet).
+- Attribution fixed: all 14 earlier commits carry
+  `Co-Authored-By: dipa-studio`; 0083/0084 also credit
+  `Co-Authored-By: MakrSas` (ios-topaz 0138/0085). Branch pushed to
+  `awa-xaga/ios-enchilada`.
+- **Next when resuming:** retry downloading the 0086 kernel; build the image
+  with the tested `pram=0x100000000` ADT, the SCM/WDT shim and
+  `sweettsyn=1 sweetfb_stayon=1 sweetswipetest=20 sweetswipetest` plus
+  `sweetfb_noconsole=0` so the touch probe prints are visible; record the
+  `SWEET TOUCH: syn` lines; then implement the F12 report (`sweet_hid_touch`)
+  and the PM8998 keys. Last known-good lock-screen image:
+  `shim/out/shim-boot-enchilada-0083-pram100.img` (ccff345b...).
+
 ### >>> 2026-10-22 ~04:35: iOS LOCK SCREEN ON THE ONEPLUS 6 (milestone) <<<
 
 **The OnePlus 6 now shows the iOS 16 lock screen.** Kernel **0083** (0082
