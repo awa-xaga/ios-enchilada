@@ -3,6 +3,41 @@
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-21: OnePlus 6 (enchilada, SDM845) port started <<<
+### >>> UPDATE 2026-10-22: enchilada iOS userland runs; watchdog + pram ***
+
+**STATE:** the iOS 16 root is flashed into the OP6 userdata and XNU boots to the
+iOS userland: launchd, backboardd, SpringBoard, AppleCLCD, the daemon set and
+the display power fade all run. The blocker is a hardware reset (900E) ~150 s
+after boot, not a kernel panic (`/pram` stays zero) and not the CPU count
+(cpus=1/4/8 all reach userland; cpus=8 was slower/red-bar).
+
+- **Early hang fixed:** XNU stopped after `kprintf initialized` (next step is
+  `PE_create_console` -> `check_for_panic_log`). The panic log at the TOP of
+  the high bank (0x27CAA0000 on enchilada) never returned from the
+  map/zero. Moving `/pram` just BELOW phys_base fixed it: enchilada
+  0x17ff00000, sweet 0x0fff00000. `tools/mkadt.py` now does this permanently
+  (the old code put it at dram-base+dram-size-1MiB and shrank dram-size).
+- **Watchdog:** the OP6 DTS `qcom,wdt@17980000` bark-time is 11000 ms and the
+  bite lands ~144-167 s into the boot. The shim's
+  `SCM_SVC_BOOT/SCM_SVC_SEC_WDOG_DIS` SCM call returns 0 (secure wdog off) and
+  both WDT register layouts were written 0, yet the reset persists; no
+  `MACH Reboot`/panic is logged. Patch **0082** adds a kernel thread started
+  from `sweet_keys_init()` that pets WDT0_RST/APCS_TMR RST every 2 s (runs even
+  though the PM6150 key driver does not match the PM8998). CI build pending.
+- **Display:** AppleCLCD opens and backboardd configures it; the Apple logo
+  fades to black via patch 0079 IOMFB RequestPowerChange(0), then the SoC
+  resets. No `SWEET FB: swap`/IOSurface create yet: backboardd still polls
+  `IOAcceleratorES -> 0 found`, i.e. the CoreAnimation software path has not
+  started drawing. Touch (Synaptics S3320) and keys (PM8998) are not ported yet.
+- Images used for these tests: `shim-boot-enchilada-wdt2.img` (cpus=1,
+  pramlow ADT), `-cpus4.img`, `-cpus8.img`, `-scmdiag.img` (shim-only SCM
+  print). Backups: `backup/enchilada-edl-20261021/` (818 MB, 101 partitions,
+  SHA256SUMS). EDL loader: `Loaders/oneplus/..._fhprg_op6t.bin`.
+
+**NEXT:** run CI for 0082, download `xnu-kernel`, rebuild the payload with the
+new pram ADT + shim SCM/WDT and boot cpus=1; expect no 900E. Then read `/pram`
+on any panic (low address) and attack the CA/software-renderer path.
+
 
 **STATE:** no phone is attached on this machine (`fastboot devices` empty) and the
 `/run/media/dipa` SSD from the sweet notes is not mounted, so nothing below has

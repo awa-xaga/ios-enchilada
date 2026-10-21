@@ -395,6 +395,15 @@ void shim_main(uint64_t dtb)
 		con_hex("SPLASH", sa);
 		con_hex("SPLSIZE", ss);
 	}
+	/* Qualcomm secure watchdog disable (SCM_SVC_BOOT/SCM_SVC_SEC_WDOG_DIS).
+	 * Returns 0 on the OP6. The kernel also pets the APCS watchdog. */
+	con_hex("SCM64", smc(0x42000107UL, 1, 1, 0));
+	con_hex("SCM32", smc(0x02000107UL, 1, 1, 0));
+	wr32(0x17980004UL, 1);	/* KPSS WDT0_RST */
+	wr32(0x17980008UL, 0);	/* KPSS WDT0_EN */
+	wr32(0x17980038UL, 1);	/* APCS_TMR WDT_RST */
+	wr32(0x17980040UL, 0);	/* APCS_TMR WDT_EN */
+	con_str("WDT", "both layouts disabled");
 	con_skip();
 
 	const char *why = loader_boot(dtb);

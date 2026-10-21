@@ -86,9 +86,11 @@ def build(seed=None, qemu=False, highmem=False, board='sweet'):
     """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
     b = BOARDS[board]
     phys_base, mem_size = (b['high_base'], b['high_size']) if highmem else (PHYS_BASE, MEM_SIZE)
-    # Carve the panic log off the top so the kernel never allocates over it.
-    panic_base = phys_base + mem_size - PANIC_LOG_SIZE
-    mem_size -= PANIC_LOG_SIZE
+    # Keep the panic log in the low bank just below the kernel's dram range.
+    # The top of the high bank hung check_for_panic_log() on enchilada
+    # (0x27CAA0000: the mapping/zeroing of that address never returned); the
+    # 1 MiB below phys_base is unused RAM on both boards.
+    panic_base = phys_base - PANIC_LOG_SIZE
     gicd, gicr, timebase = (QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE) if qemu else (GICD, GICR, TIMEBASE)
     seed = seed if seed is not None else os.urandom(64)
     phandle = iter(range(1, 1000))

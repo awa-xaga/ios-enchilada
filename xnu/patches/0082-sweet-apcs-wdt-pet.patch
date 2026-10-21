@@ -1,0 +1,47 @@
+--- a/bsd/dev/sweet_keys.c
++++ b/bsd/dev/sweet_keys.c
+@@ -90,6 +90,31 @@
+ 	thread_block(THREAD_CONTINUE_NULL);
+ }
+ 
++/* Pet the Qualcomm APCS watchdog from a kernel thread. The secure SCM
++ * disable and WDT0_EN writes were not enough on enchilada; the ~11 s bark /
++ * ~150 s bite still reset the SoC while iOS was booting. */
++static void
++sweet_wdt_thread(void *arg, wait_result_t result)
++{
++	vm_offset_t regs = ml_io_map(0x17980000, 0x1000);
++	(void)arg;
++	(void)result;
++	printf("SWEET WDT: APCS pet thread regs=%#lx\n", (unsigned long)regs);
++	for (;;) {
++		if (regs) {
++			*(volatile uint32_t *)(regs + 0x04) = 1;	/* WDT0_RST */
++			*(volatile uint32_t *)(regs + 0x08) = 0;	/* WDT0_EN */
++			*(volatile uint32_t *)(regs + 0x38) = 1;	/* APCS_TMR RST */
++			*(volatile uint32_t *)(regs + 0x40) = 0;	/* APCS_TMR EN */
++			__asm__ volatile("dsb sy" ::: "memory");
++		}
++		uint64_t deadline;
++		clock_interval_to_deadline(2000, NSEC_PER_MSEC, &deadline);
++		(void)assert_wait_deadline(&keys_sleep_chan, THREAD_UNINT, deadline);
++		thread_block(THREAD_CONTINUE_NULL);
++	}
++}
++
+ static void
+ keys_thread(void *arg, wait_result_t result)
+ {
+@@ -131,6 +156,12 @@
+ 		return;
+ 	}
+ 	keys_started = true;
++	/* Independent of the PM6150 keys: always keep the APCS watchdog fed. */
++	if (kernel_thread_start(sweet_wdt_thread, NULL, &thread) == KERN_SUCCESS) {
++		thread_deallocate(thread);
++	} else {
++		printf("SWEET WDT: thread start failed\n");
++	}
+ 	(void)PE_parse_boot_argn("sweetkeys", &enabled, sizeof(enabled));
+ 	if (!enabled) {
+ 		printf("SWEET KEYS: disabled (sweetkeys=0)\n");
