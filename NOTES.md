@@ -2,7 +2,43 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
-### >>> 2026-10-22 09:00 UTC: boot image reproduced locally (current handoff) <<<
+### >>> 2026-10-22 09:20 UTC: reproduced image boots to the LOCK SCREEN <<<
+
+**Verified on the phone (fastboot boot, nothing flashed): the boot image built
+on THIS machine reaches the iOS lock screen in 3-5 minutes**, no console text
+over it, no 900E. Working file: `shim/out/shim-boot-enchilada.img`,
+17,739,776 bytes, sha256
+`e60422879534a532f26d07e04879d95b764e8e4882a71fe720f5e8d4fd605a9c`
+(= `shim-boot-enchilada-0083-console.img`, see the console note below). So the
+local shim build, the regenerated ADT and `tools/mkenchilada.py` are all good;
+nothing from the previous machine is needed.
+
+- **`sweetfb_noconsole=0` is the difference between the lock screen and a
+  black panel.** Two boots with `sweetfb_noconsole=1` (one with the freshly
+  built payload, one with the saved `payload-ench-0083-pram100.bin`) sat on a
+  black screen with a red strip at the bottom for 3-6 min; the same payload
+  with `sweetfb_noconsole=0` shows the lock screen in 3-5 min. The red strip
+  is the shim's `con_clear(RED)`/fbcon black left in the last rows of the
+  panel buffer and disappears once the GUI presents, so its presence means
+  "the GUI never presented a frame". Cause of the mute-path failure is not
+  understood (it works on sweet); 0067 sets `sweet_console_muted` on the first
+  swap. Treat `sweetfb_noconsole=1` as broken on enchilada until tested again.
+- The saved `payload-ench-0083-pram100.bin` and the payload rebuilt here are
+  the same 16,617,168 bytes except the 64-byte `/chosen/random-seed`, so 0083
+  is confirmed as the kernel that boots (no 0084/0085/0086 binary exists here).
+- Boot tried and rejected as too slow/pointless: none. The diag image
+  (`shim-boot-enchilada-diag.img`, payload-less, UFS probe) was packed but not
+  booted this session.
+- **NEXT:** the lock screen cannot be unlocked - touch (S3320) and the PM8998
+  keys are still not ported and this session has no 0086 kernel. Get
+  `xnu-kernel` of CI run 39673681312 (0086: touch probe + `sweetswipetest`)
+  with `gh run download 39673681312 -n xnu-kernel -D xnu/out-0086` on a machine
+  that has a GitHub token (this machine has none: `~/.git-credentials` only has
+  gitee), copy `kernel.development.sweet` here, then
+  `tools/mkiosboot.sh boot.img xnu/out-0086/kernel.development.sweet` and boot
+  with `sweetfb_noconsole=0 sweettsyn=1 sweetswipetest=20`.
+
+### >>> 2026-10-22 09:00 UTC: boot image reproduced locally <<<
 
 **A bootable enchilada image exists again on this machine:**
 `shim/out/shim-boot-enchilada.img`, 17,739,776 bytes, sha256

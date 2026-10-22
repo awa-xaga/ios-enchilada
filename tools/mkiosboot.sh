@@ -23,9 +23,11 @@ OUT=${3:-shim/out/shim-boot-enchilada.img}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# The boot-args the known-good enchilada image used: one CPU, watchdog pet,
-# no kernel console over the GUI, 30 Hz present, HFS+ root on UFS.
-CMDLINE='debug=0xc cpus=1 keepsyms=1 -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30 startup_debug=1'
+# The boot-args that reach the lock screen on the OP6: one CPU, watchdog pet,
+# 30 Hz present, HFS+ root on UFS. sweetfb_noconsole=0 matters - with 1 the
+# panel stays black at "GUI never presented" while the same payload with 0
+# shows the lock screen in 3-5 min (see NOTES.md 2026-10-22 09:20).
+CMDLINE='debug=0xc cpus=1 keepsyms=1 -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=0 sweetfb_hz=30 startup_debug=1'
 
 echo "== shim (BOARD=enchilada)"
 BOARD=enchilada ./shim/build.sh
