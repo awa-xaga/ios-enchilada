@@ -17,3 +17,6 @@ ipsw/
 edl_config.json
 log.txt
 /boot.img
+/*.jpg
+/*.jpeg
+/*.png

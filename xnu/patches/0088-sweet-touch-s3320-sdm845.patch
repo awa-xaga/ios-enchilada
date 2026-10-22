@@ -25,68 +25,81 @@
  	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) {
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
-@@ -556,10 +556,48 @@
+@@ -72,7 +72,7 @@
+ #define SE_PACK1        0x000ffefeu
+ 
+ static struct {
+-	vm_offset_t se, gcc, gpio;
++	vm_offset_t se, gcc, gpio, gpio_s;
+ 	bool started, dead, probing;
+ 	int kind, irq_hint;
+ 	uint32_t irq_status, irq_last, active;
+@@ -556,10 +556,50 @@
  #define SYN_RCG         0x184d8u
  #define SYN_BRANCH      0x184d4u
  #define SYN_TLMM_PA     0x03400000u
-+#define SYN_TLMM_SIZE   0x00c00000u	/* all tiles, sdm845-pinctrl.dtsi */
++/* sdm845 TLMM is tiled: NORTH at +0x500000, SOUTH at +0x900000, 0x1000 per
++ * pin (sdm845-pinctrl.dtsi maps 0xc00000, but one ml_io_map of that size
++ * panics in kmem_alloc_contig - map the two tiles we need separately). */
 +#define SYN_TILE_NORTH  0x00500000u
 +#define SYN_TILE_SOUTH  0x00900000u
++#define SYN_TILE_SIZE   0x00100000u
  #define SYN_I2C_ADDR    0x20u
  #define SYN_F12_MAP     0xDDu
  #define SYN_F01_MAP     0xE3u
  
-+/* SDM845 TLMM is tiled (0x1000 per pin): the S3320 pins are 49/50 (I2C,
-+ * qup12), 99 (reset) and 125 (irq) in NORTH, 88 (1v8 enable) in SOUTH. */
-+static uint32_t
-+syn_gpio_off(unsigned pin)
++/* The S3320 pins are 49/50 (I2C, qup12), 99 (reset) and 125 (irq) in NORTH,
++ * 88 (1v8 enable) in SOUTH; the offset is pin * 0x1000 within the tile. */
++static vm_offset_t
++syn_gpio_base(unsigned pin)
 +{
-+	uint32_t tile = (pin == 88) ? SYN_TILE_SOUTH : SYN_TILE_NORTH;
-+	return tile + pin * 0x1000u;
++	return (pin == 88) ? st.gpio_s : st.gpio;
 +}
 +
 +static void
 +syn_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out, bool high)
 +{
-+	uint32_t off = syn_gpio_off(pin);
-+	uint32_t cfg = touch_rd(st.gpio, off);
++	vm_offset_t base = syn_gpio_base(pin);
++	uint32_t off = pin * 0x1000u;
++	uint32_t cfg = touch_rd(base, off);
 +	if (out) {
-+		touch_wr(st.gpio, off + 4u,
-+		    (touch_rd(st.gpio, off + 4u) & ~2u) | (high ? 2u : 0u));
++		touch_wr(base, off + 4u, (touch_rd(base, off + 4u) & ~2u) | (high ? 2u : 0u));
 +	}
 +	cfg &= ~0x3ffu;
 +	cfg |= (mux << 2) | pull | (drive << 6) | (out ? 0x200u : 0u);
-+	touch_wr(st.gpio, off, cfg);
++	touch_wr(base, off, cfg);
 +}
 +
 +static uint32_t
 +syn_gpio_cfg(unsigned pin)
 +{
-+	return touch_rd(st.gpio, syn_gpio_off(pin));
++	return touch_rd(syn_gpio_base(pin), pin * 0x1000u);
 +}
 +
 +static uint32_t
 +syn_gpio_io(unsigned pin)
 +{
-+	return touch_rd(st.gpio, syn_gpio_off(pin) + 4u);
++	return touch_rd(syn_gpio_base(pin), pin * 0x1000u + 4u);
 +}
 +
  static void
  touch_syn_dump(const char *tag, const uint8_t *b, unsigned n)
  {
-@@ -583,29 +621,30 @@
+@@ -583,29 +623,31 @@
  
  	st.se = ml_io_map(SYN_SE_PA, 0x4000);
  	st.gcc = ml_io_map(TOUCH_GCC_PA, 0x100000);
 -	st.gpio = ml_io_map(SYN_TLMM_PA, 0x100000);
-+	st.gpio = ml_io_map(SYN_TLMM_PA, SYN_TLMM_SIZE);
++	st.gpio = ml_io_map(SYN_TLMM_PA + SYN_TILE_NORTH, SYN_TILE_SIZE);
++	st.gpio_s = ml_io_map(SYN_TLMM_PA + SYN_TILE_SOUTH, SYN_TILE_SIZE);
  	st.rcg = SYN_RCG;
  	st.branch = SYN_BRANCH;
 -	st.vote_mask = (0x1fu << 18) | (1u << 23);
+-	if (!st.se || !st.gcc || !st.gpio) {
 +	/* SE12 = GCC_QUPV3_WRAP1_S4_CLK -> vote bit 26, plus the wrapper
 +	 * AHB clocks (M_AHB bit 20, S_AHB bit 21) as in gcc-sdm845.c. */
 +	st.vote_mask = (1u << 26) | (1u << 20) | (1u << 21);
- 	if (!st.se || !st.gcc || !st.gpio) {
++	if (!st.se || !st.gcc || !st.gpio || !st.gpio_s) {
  		printf("SWEET TOUCH: syn MMIO map failed\n");
  		return;
  	}
