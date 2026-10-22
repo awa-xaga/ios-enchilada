@@ -2,6 +2,55 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### >>> 2026-10-22 11:40 UTC: WHY BOOTS STALLED + S3320 touch bring-up <<<
+
+**Root cause of the intermittent boot stall: the persistent-log flush.** With
+`sweetlog` on (default) the log thread wakes every 10 s and writes the ring to
+the last blocks of userdata **while holding `sweet_ufs_lock`**, the same mutex
+every UFS read/write takes. When that write wedges, all userland I/O hangs and
+launchd stops at a random early job (`launchd_cache_loader`, `init_featureflags`,
+...), while the kernel stays alive (sampler keeps printing). Confirmed by
+comparison: `logs/boot-0083-ok.txt` (working) has `Cache sent to launchd
+successfully` + `Early boot complete`; `logs/boot-0087.txt` and
+`logs/boot-0086b.txt` stop before them. **`sweetlog=0` fixes it** (three clean
+lock-screen boots), and `ufslogsecs=300` is enough to keep one late log write
+for diagnostics. `fastboot boot` images still end in Qualcomm **900E** after a
+reset; only a 10-15 s power cycle gets back to fastboot.
+
+**New tooling on this machine:** `gh` 2.103.0 in `~/.local/bin` (logged in as
+awa-xaga, `gh auth setup-git` done), so CI runs can be watched/downloaded and
+commits pushed from here. `tools/im4p-extract.py` decodes IM4P device trees
+(with `pip install lzfse`), `tools/mkiosboot.sh` builds a boot image end to end.
+A local **C syntax check** works: `xnucc.py`-style replay of the CI compile line
+with a downloaded `xnu-buildtree` (C only - Apple's `__builtin_xnu_type_signature`
+keeps C++ from checking on Linux clang).
+
+**Kernels built today (all via awa-xaga CI, `gh run watch`):** 0086
+(run 39705634088, after fixing the missing `keys_sleep`), 0087 (39708252636,
+panel-size HID fix), 0088 (39717147550, S3320 SDM845 bring-up). Boot images:
+`shim-boot-enchilada-0087.img`, `-tsyn.img`, `-nolog.img`, `-tsyn2.img`.
+
+**S3320 probe results (logs/boot-tsyn.txt, kernel 0087):** the probe runs and
+does NOT break the boot (the lock screen still comes up). Three real failures,
+all now addressed from the OP6 vendor sources (`~/android_kernel_oneplus_sdm845`):
+- TLMM read 0 for every pin: **sdm845 TLMM is tiled**, NORTH at +0x500000,
+  SOUTH at +0x900000, 0x1000 per pin, reg window 0xc00000. S3320 pins: 49/50
+  (qup12 I2C), 99 (reset), 125 (irq) are NORTH, 88 (1v8 enable) is SOUTH.
+- `syn LDOA28 rc=22`: `sweet_rpmh_vreg_enable()` only accepted `ldoc11` and
+  2950-3400 mV; the OP6 rail is **pm8998_l28 at 3008 mV** (DTS), looked up in
+  the CMD-DB by name (`rpmh-regulator-ldoa28`), so 0088 relaxes the guard to
+  any VRM LDO 1800-3600 mV.
+- `GCC branch 0x184d4 halted`: SE12 is **GCC_QUPV3_WRAP1_S4_CLK**, so the
+  0x5200c vote is bit 26 (+ wrapper AHB bits 20/21), not sweet's bits 18-23.
+- Touch geometry from the DTS: `display-coords`/`panel-coords` are
+  **1080x2160**, not the 1080x2280 panel - the F12 report must be scaled.
+
+**Synthetic unlock swipe (0085+0087) still does not unlock** even though the
+log shows `SWEET HID: touch 0 down at 540,2270 edge` and backboardd has the
+digitizer open (`SweetHIDTouch open by IOHIDEventServiceUserClient -> 1`).
+Next idea if real touch is not ready: repeat the swipe a few times later in the
+boot instead of once at 330 s.
+
 ### >>> 2026-10-22 10:00 UTC: newest kernel available again (gh + CI fixed) <<<
 
 **Tooling that now exists on this machine:** `~/.local/bin/gh` 2.103.0, logged
