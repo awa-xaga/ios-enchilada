@@ -2,8 +2,63 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### >>> 2026-10-22 09:00 UTC: boot image reproduced locally (current handoff) <<<
+
+**A bootable enchilada image exists again on this machine:**
+`shim/out/shim-boot-enchilada.img`, 17,739,776 bytes, sha256
+`5e9eaab9ef37f6d9f36ec78c68313d3bc6ce6c3cda881a77fbd1d741fc9e66cd`
+(same size as the known-good `shim-boot-enchilada-0083-pram100.img`). Nothing
+has been booted yet in this session: `fastboot devices` is empty, so the next
+step is the user putting the phone into fastboot and
+`fastboot boot shim/out/shim-boot-enchilada.img`.
+
+What was reconstructed and verified (observations, not guesses):
+
+- **Kernel source of truth = the CI artifacts in `~/下载`.** `xnu-kernel.zip`
+  (2026-10-18 19:25) is pre-0082 (no `_sweet_wdt_thread`, no
+  `IOAcceleratorES`). `xnu-kernel(2).zip` (2026-10-21 20:18, = header
+  `_sweet_wdt_thread` + `IOAcceleratorES`) is **0082+0083**, i.e. the
+  lock-screen kernel; its `kernel.development.sweet` is now
+  `xnu/out-0083/kernel.development.sweet` (17,209,576 bytes).
+  There is **no 0084/0085/0086 binary here and no way to build one locally**
+  (no Xcode/macOS SDK; `research/` is gone). `xnu-buildtree(2).zip` holds the
+  patched xnu tree + generated headers if a macOS machine shows up again.
+- **`boot.img` in the repo root is the STOCK OOS one** (`Image.gz-dtb`
+  22,342,066 bytes = gzip stream + 1,110,175-byte 3-FDT tail, Android 11
+  vendor ramdisk 16.4 MB). It is only used as container/DTB source and header.
+  (Different file from `~/下载/boot.img`, kernel 18,187,770 / ramdisk 1.3 MB.)
+- **`/product` is back: no Apple artifact is needed from the SSD any more.**
+  `tools/remotezip.py <IPSW URL> DeviceTree.d22ap.im4p research/ipsw-x` pulls
+  the 33,719-byte im4p out of the 16.7.16 (20H392) IPSW with range requests;
+  new `tools/im4p-extract.py` decodes the IM4P DER body (payload is LZFSE,
+  `bvx2`) to `research/ipsw-x/d22ap.adt`, 186,084 bytes - exactly the size
+  recorded below. `lzfse` came from a venv (`pip install lzfse`); the tool also
+  falls back to an `lzfse` binary.
+- **The payload reproduces bit-exactly.** `mkpayload.py` with the 0083 kernel,
+  a fresh enchilada ADT and the recorded cmdline gives 16,617,168 bytes and
+  differs from the saved `~/payload-ench-0083-pram100.bin` in **64 bytes only**
+  (the `/chosen/random-seed` at 0xfd5f74), i.e. that file is really 0083 and
+  the new ADT is structurally identical to the tested one (`/pram`
+  0x100000000, dram 0x180000000/0xfcaa0000, `/product` iPhone X, display-scale 3).
+- **New `tools/mkiosboot.sh STOCK_BOOT.IMG KERNEL [OUT.img]`** does the whole
+  chain in one go (shim `BOARD=enchilada` -> `mkadt --highmem` -> payload with
+  the known-good cmdline -> `mkenchilada --template`), and the result was
+  re-unpacked: the gzip stream decompresses to `shim/out/Image` byte for byte,
+  the DTB table is identical to the stock one, ramdisk == payload.
+- Cmdline in the payload (unchanged from the working image): `debug=0xc cpus=1
+  keepsyms=1 -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1
+  wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1
+  sweetfb_noconsole=1 sweetfb_hz=30 startup_debug=1`. The shim still has the
+  SCM/APCS watchdog disable (`SCM64`/`SCM32` strings) from 222b9d4.
+- **Untested here:** that the iOS root is still in `userdata` (last flash was
+  2026-10-22 ~04:00) and the boot itself. If it boots to the lock screen, the
+  next blocker is still input: no 0086 binary -> no Synaptics probe and no
+  `sweetswipetest`; getting 0084-0086 needs a `gh run download` with auth (or a
+  macOS build), the token is NOT on this machine (only a gitee entry in
+  `~/.git-credentials`).
+
 ### >>> UPDATE 2026-10-21: OnePlus 6 (enchilada, SDM845) port started <<<
-### >>> 2026-10-22 input work (current handoff) <<<
+### >>> 2026-10-22 input work <<<
 
 - **0084** (topaz 0085) ignores display-off with `sweetfb_stayon=1`;
   **0085** injects a synthetic unlock swipe with `sweetswipetest=N`;
