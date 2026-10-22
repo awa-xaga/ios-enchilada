@@ -2,6 +2,46 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### >>> 2026-10-22 10:00 UTC: newest kernel available again (gh + CI fixed) <<<
+
+**Tooling that now exists on this machine:** `~/.local/bin/gh` 2.103.0, logged
+in as `awa-xaga` (device flow, keyring, scopes gist/read:org/repo/workflow) and
+`gh auth setup-git` done, so `git push` and `gh run download` work from here.
+`pip install lzfse` lives in a throwaway venv (`/tmp/opencode/venv`).
+
+- **CI 39673681312 (0086) failed, not "queued":** `sweet_keys.c:128/134 error:
+  call to undeclared function 'keys_sleep'`. 0085 used a helper that never
+  existed. Fixed in **6ac4c86** (adds `keys_sleep()` next to `keys_wait()`);
+  CI **39705634088 succeeded** -> `xnu/out-0086/kernel.development.sweet`
+  (17,226,056 bytes, sha256 e801f8c9...).
+- **Local C syntax check works** (useful before spending a CI run): take the
+  exact clang line out of a `gh run view --log`, replace the CI paths with an
+  extracted `xnu-buildtree`, `-include meta_features.h` from
+  `build/xnu.obj/DEVELOPMENT_ARM64_SWEET/<component>/DEVELOPMENT/`, drop
+  `-c/-o/-arch/-mkernel/-march`, add `-fsyntax-only -target
+  arm64-apple-macos14`. `sweet_keys.c` (0085) and `sweet_touch.c` (0086) both
+  compile. C++ does not: Apple's `__builtin_xnu_type_signature` is missing
+  from the Linux clang, so SweetHID.cpp/SweetFramebuffer.cpp changes are
+  CI-checked only.
+- **phases measured on the phone (0086 + `sweetfb_noconsole=0`,
+  `sweetswipetest=330`):** lock screen appeared in 3-5 min, **but the synthetic
+  swipe did not unlock it**. Root cause found by reading the code: SweetHID
+  hardcoded sweet's panel (`y > 2399-48` for the edge flag, `fOffY = 18`), so
+  on the 1080x2280 panel the bottom edge is unreachable and
+  `kIOHIDDigitizerEventFromEdgeTip` is never set -> no home/unlock gesture.
+  **0087** (8f49aeb) exports `sweet_panel_w/h` from AppleCLCD and reads them
+  in `SweetHIDTouch::touch()` (start() may run before AppleCLCD).
+  CI **39708252636 succeeded** -> `xnu/out-0087`, image
+  `shim/out/shim-boot-enchilada-0087.img` (sha256 53c5eb78...), test running.
+- **`sweettsyn=1` (0086 S3320 probe) breaks the boot**: with
+  `sweettsyn=1 sweetfb_stayon=1` the panel stayed black (GUI never presented)
+  while the same kernel with only `sweetswipetest` reaches the lock screen.
+  Suspect the RPMh A28 vote / GENI SE12 access stalling UFS (RPMh lock), not
+  yet proven - the probe needs its own boot with the persistent log.
+- After every test boot the phone drops into Qualcomm **900E** (the image is
+  not flashed): long-press power 10-15 s, then Vol+/Vol- + USB returns it to
+  fastboot.
+
 ### >>> 2026-10-22 09:20 UTC: reproduced image boots to the LOCK SCREEN <<<
 
 **Verified on the phone (fastboot boot, nothing flashed): the boot image built

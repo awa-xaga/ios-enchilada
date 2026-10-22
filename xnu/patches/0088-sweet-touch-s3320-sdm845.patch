@@ -1,0 +1,119 @@
+--- a/bsd/dev/sweet_rpmh.c
++++ b/bsd/dev/sweet_rpmh.c
+@@ -320,16 +320,18 @@
+ 		return EIO;
+ 	}
+ 	rh_poisoned = false;
+-	printf("SWEET RPMH: L11C ACTIVE vote complete (rail voltage requires hardware verification)\n");
++	printf("SWEET RPMH: ACTIVE vote complete (rail voltage requires hardware verification)\n");
+ 	return 0;
+ }
+ 
+ int
+ sweet_rpmh_vreg_enable(const char *res, unsigned mv)
+ {
+-	/* Board-specific helper: do not apply PMIC5-LDO policy to arbitrary resources. */
+-	if (!res || strcmp(res, "ldoc11") || mv < 2950 || mv > 3400) {
+-		printf("SWEET RPMH: expected ldoc11 and 2950..3400 mV\n");
++	/* Any RPMh VRM LDO: sweet votes on ldoc11 (touch), enchilada on the
++	 * PM8998 ldoa28 rail (the S3320 VDD_2V8). Same TCS layout, so only the
++	 * voltage has to be sane. */
++	if (!res || !res[0] || mv < 1800 || mv > 3600) {
++		printf("SWEET RPMH: refusing %s at %u mV\n", res ? res : "(null)", mv);
+ 		return EINVAL;
+ 	}
+ 	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) {
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -556,10 +556,48 @@
+ #define SYN_RCG         0x184d8u
+ #define SYN_BRANCH      0x184d4u
+ #define SYN_TLMM_PA     0x03400000u
++#define SYN_TLMM_SIZE   0x00c00000u	/* all tiles, sdm845-pinctrl.dtsi */
++#define SYN_TILE_NORTH  0x00500000u
++#define SYN_TILE_SOUTH  0x00900000u
+ #define SYN_I2C_ADDR    0x20u
+ #define SYN_F12_MAP     0xDDu
+ #define SYN_F01_MAP     0xE3u
+ 
++/* SDM845 TLMM is tiled (0x1000 per pin): the S3320 pins are 49/50 (I2C,
++ * qup12), 99 (reset) and 125 (irq) in NORTH, 88 (1v8 enable) in SOUTH. */
++static uint32_t
++syn_gpio_off(unsigned pin)
++{
++	uint32_t tile = (pin == 88) ? SYN_TILE_SOUTH : SYN_TILE_NORTH;
++	return tile + pin * 0x1000u;
++}
++
++static void
++syn_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out, bool high)
++{
++	uint32_t off = syn_gpio_off(pin);
++	uint32_t cfg = touch_rd(st.gpio, off);
++	if (out) {
++		touch_wr(st.gpio, off + 4u,
++		    (touch_rd(st.gpio, off + 4u) & ~2u) | (high ? 2u : 0u));
++	}
++	cfg &= ~0x3ffu;
++	cfg |= (mux << 2) | pull | (drive << 6) | (out ? 0x200u : 0u);
++	touch_wr(st.gpio, off, cfg);
++}
++
++static uint32_t
++syn_gpio_cfg(unsigned pin)
++{
++	return touch_rd(st.gpio, syn_gpio_off(pin));
++}
++
++static uint32_t
++syn_gpio_io(unsigned pin)
++{
++	return touch_rd(st.gpio, syn_gpio_off(pin) + 4u);
++}
++
+ static void
+ touch_syn_dump(const char *tag, const uint8_t *b, unsigned n)
+ {
+@@ -583,29 +621,30 @@
+ 
+ 	st.se = ml_io_map(SYN_SE_PA, 0x4000);
+ 	st.gcc = ml_io_map(TOUCH_GCC_PA, 0x100000);
+-	st.gpio = ml_io_map(SYN_TLMM_PA, 0x100000);
++	st.gpio = ml_io_map(SYN_TLMM_PA, SYN_TLMM_SIZE);
+ 	st.rcg = SYN_RCG;
+ 	st.branch = SYN_BRANCH;
+-	st.vote_mask = (0x1fu << 18) | (1u << 23);
++	/* SE12 = GCC_QUPV3_WRAP1_S4_CLK -> vote bit 26, plus the wrapper
++	 * AHB clocks (M_AHB bit 20, S_AHB bit 21) as in gcc-sdm845.c. */
++	st.vote_mask = (1u << 26) | (1u << 20) | (1u << 21);
+ 	if (!st.se || !st.gcc || !st.gpio) {
+ 		printf("SWEET TOUCH: syn MMIO map failed\n");
+ 		return;
+ 	}
+ 	/* I2C pins GPIO49/50 (qup12), IRQ 125 input pull-up, 1v8 88, reset 99. */
+-	touch_gpio(49, 1, 0, 2, false, false);
+-	touch_gpio(50, 1, 0, 2, false, false);
+-	touch_gpio(125, 0, 2, 2, false, false);
+-	touch_gpio(88, 0, 2, 2, true, true);
+-	touch_gpio(99, 0, 2, 2, true, false);
++	syn_gpio(49, 1, 0, 0, false, false);	/* qup12 SDA/SCL, 2 mA, no pull */
++	syn_gpio(50, 1, 0, 0, false, false);
++	syn_gpio(125, 0, 3, 3, false, false);	/* irq input, pull-up (ts_active) */
++	syn_gpio(88, 0, 0, 3, true, true);	/* 1v8 rail enable, high */
++	syn_gpio(99, 0, 3, 3, true, false);	/* reset asserted (active low) */
+ 	printf("SWEET TOUCH: syn gpio reset=%#x 1v8=%#x irq=%#x i2c=%#x/%#x\n",
+-	    touch_rd(st.gpio, TOUCH_GPIO_IO(99)), touch_rd(st.gpio, TOUCH_GPIO_IO(88)),
+-	    touch_rd(st.gpio, TOUCH_GPIO_IO(125)), touch_rd(st.gpio, TOUCH_GPIO_CFG(49)),
+-	    touch_rd(st.gpio, TOUCH_GPIO_CFG(50)));
+-	int l28 = sweet_rpmh_vreg_enable("ldoa28", 3008000);
++	    syn_gpio_io(99), syn_gpio_io(88), syn_gpio_io(125),
++	    syn_gpio_cfg(49), syn_gpio_cfg(50));
++	int l28 = sweet_rpmh_vreg_enable("ldoa28", 3008);
+ 	printf("SWEET TOUCH: syn LDOA28 rc=%d\n", l28);
+ 	/* 1v8 up, reset low 10 ms, high 10 ms, then release. */
+ 	touch_wait(10);
+-	touch_gpio(99, 0, 2, 2, true, true);
++	syn_gpio(99, 0, 3, 3, true, true);	/* release reset */
+ 	touch_wait(20);
+ 	if (!touch_clocks())
+ 		return;
