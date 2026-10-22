@@ -27,9 +27,9 @@
 +		keys_sleep(1000);
 +	}
 +	printf("SWEET HID: synthetic unlock swipe (panel 1080x2280)\n");
-+	sweet_hid_touch(0, 1, 540, 2250);
++	sweet_hid_touch(0, 1, 540, 2270);
 +	for (int i = 1; i <= 20; i++) {
-+		sweet_hid_touch(0, 1, 540, 2250 - i * 75);
++		sweet_hid_touch(0, 1, 540, 2270 - i * 75);
 +		keys_sleep(20);
 +	}
 +	sweet_hid_touch(0, 0, 540, 750);

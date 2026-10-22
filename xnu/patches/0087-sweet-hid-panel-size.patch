@@ -1,0 +1,99 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -82,6 +82,10 @@
+ #define SWEET_FB_LOGICAL_H              2436
+ #define SWEET_FB_FORMAT_BGRA            0x42475241
+ 
++/* Panel geometry as ABL left it in PE_Video. SweetHID.cpp maps the touch
++ * coordinates with it (sweet: 1080x2400, enchilada: 1080x2280). */
++uint32_t sweet_panel_w, sweet_panel_h;
++
+ class IOMobileFramebuffer : public IOService {
+ 	OSDeclareDefaultStructors(IOMobileFramebuffer);
+ };
+@@ -179,6 +183,8 @@
+ 		IOLog("SWEET FB: no boot framebuffer\n");
+ 		return false;
+ 	}
++	sweet_panel_w = fWidth;
++	sweet_panel_h = fHeight;
+ 	int native = 0;
+ 	PE_parse_boot_argn("sweetfb_native", &native, sizeof(native));
+ 	fLogicalW = fWidth;
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -356,6 +356,14 @@
+  * app-switcher gesture.
+  */
+ #define SWEET_TOUCH_EDGE_PX 48
++/* Logical display presented to userland (SweetFramebuffer.cpp). The panel
++ * itself is whatever AppleCLCD found: 1080x2400 on sweet, 1080x2280 on
++ * enchilada. Both are needed: the digitizer maps panel pixels into the
++ * presented frame, and edge contacts must be detected at the real panel
++ * border (the old 1079/2399 constants never matched on enchilada). */
++#define SWEET_HID_LOGICAL_W 1125
++#define SWEET_HID_LOGICAL_H 2436
++extern uint32_t sweet_panel_w, sweet_panel_h;
+ class SweetHIDTouch : public IOHIDEventService {
+ 	OSDeclareDefaultStructors(SweetHIDTouch);
+ public:
+@@ -367,7 +375,7 @@
+ 	virtual UInt32 getProductID() APPLE_KEXT_OVERRIDE { return 2; }
+ private:
+ 	IOLock *fLock;
+-	int fLogicalW, fLogicalH, fOffX, fOffY;
++	bool fNative;
+ 	bool fDown[SWEET_TOUCH_FINGERS];
+ 	bool fEdge[SWEET_TOUCH_FINGERS];
+ 	IOFixed fX[SWEET_TOUCH_FINGERS];
+@@ -434,10 +442,7 @@
+ 	}
+ 	int native = 0;
+ 	PE_parse_boot_argn("sweetfb_native", &native, sizeof(native));
+-	fLogicalW = native ? 1080 : 1125;
+-	fLogicalH = native ? 2400 : 2436;
+-	fOffX = (fLogicalW - 1080) / 2;
+-	fOffY = (fLogicalH - 2400) / 2;
++	fNative = native != 0;
+ 	/* The digitizer covers the main display (backboardd maps it 1:1). */
+ 	setProperty("DisplayIntegrated", kOSBooleanTrue);
+ 	setProperty("SurfaceWidth", (unsigned long long)(68 << 16), 32);	/* mm, 16.16 */
+@@ -458,22 +463,32 @@
+ 	if (finger < 0 || finger >= SWEET_TOUCH_FINGERS) {
+ 		return;
+ 	}
+-	x = x < 0 ? 0 : (x > 1079 ? 1079 : x);
+-	y = y < 0 ? 0 : (y > 2399 ? 2399 : y);
++	/* Geometry is read here, not in start(): AppleCLCD may publish the
++	 * panel size after this service starts. */
++	int pw = (int)(sweet_panel_w ? sweet_panel_w : 1080);
++	int ph = (int)(sweet_panel_h ? sweet_panel_h : 2400);
++	int lw = fNative ? pw : SWEET_HID_LOGICAL_W;
++	int lh = fNative ? ph : SWEET_HID_LOGICAL_H;
++	int ox = (lw - pw) / 2;
++	int oy = (lh - ph) / 2;
++	int max_x = pw - 1;
++	int max_y = ph - 1;
++	x = x < 0 ? 0 : (x > max_x ? max_x : x);
++	y = y < 0 ? 0 : (y > max_y ? max_y : y);
+ 
+ 	IOLockLock(fLock);
+ 	bool was = fDown[finger];
+ 	/* Panel pixels -> the presented 1125x2436 display (SweetFramebuffer.cpp). */
+-	IOFixed nx = (IOFixed)(((int64_t)(x + fOffX) << 16) / fLogicalW);
+-	IOFixed ny = (IOFixed)(((int64_t)(y + fOffY) << 16) / fLogicalH);
++	IOFixed nx = (IOFixed)(((int64_t)(x + ox) << 16) / lw);
++	IOFixed ny = (IOFixed)(((int64_t)(y + oy) << 16) / lh);
+ 	bool moved = down && (nx != fX[finger] || ny != fY[finger]);
+ 	if (was == down && !moved) {
+ 		IOLockUnlock(fLock);
+ 		return;
+ 	}
+ 	if (!was && down) {
+-		fEdge[finger] = x < SWEET_TOUCH_EDGE_PX || x > 1079 - SWEET_TOUCH_EDGE_PX ||
+-		    y < SWEET_TOUCH_EDGE_PX || y > 2399 - SWEET_TOUCH_EDGE_PX;
++		fEdge[finger] = x < SWEET_TOUCH_EDGE_PX || x > max_x - SWEET_TOUCH_EDGE_PX ||
++		    y < SWEET_TOUCH_EDGE_PX || y > max_y - SWEET_TOUCH_EDGE_PX;
+ 	}
+ 
+ 	collection = IOHIDEvent::digitizerEvent(now, 0, kIOHIDDigitizerTransducerTypeHand, false, 0, 0, 0);
